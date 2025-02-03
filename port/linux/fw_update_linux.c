@@ -85,9 +85,10 @@ enum golioth_status fw_update_post_download(void)
     return GOLIOTH_OK;
 }
 
-enum golioth_status fw_update_validate(void)
+enum golioth_status fw_update_validate(const uint8_t *hash, const size_t size)
 {
-    return GOLIOTH_OK;
+    // TODO(hasheddan): support validating candidate firmware.
+    return GOLIOTH_ERR_NOT_IMPLEMENTED;
 }
 
 enum golioth_status fw_update_change_boot_image(void)
