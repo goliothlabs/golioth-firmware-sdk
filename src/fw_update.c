@@ -81,11 +81,6 @@ static enum golioth_status fw_write_block_cb(const struct golioth_ota_component 
     {
         ctx->bytes_downloaded += block_buffer_len;
         golioth_sys_sha256_update(ctx->sha, block_buffer, block_buffer_len);
-
-        if (is_last)
-        {
-            fw_update_post_download();
-        }
     }
 
     return status;
@@ -543,6 +538,14 @@ static void fw_update_thread(void *arg)
             golioth_sys_sha256_destroy(download_ctx.sha);
             continue;
         }
+
+        if (GOLIOTH_OK != fw_update_post_download())
+        {
+            GLTH_LOGE(TAG, "Failed to perform post download operations");
+            fw_download_failed(GOLIOTH_OTA_REASON_FIRMWARE_UPDATE_FAILED);
+            golioth_sys_sha256_destroy(download_ctx.sha);
+            continue;
+        };
 
         if (GOLIOTH_OK
             != fw_verify_component_hash(&download_ctx, _component_ctx.target_component.hash))
