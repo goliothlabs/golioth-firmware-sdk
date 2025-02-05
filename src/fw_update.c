@@ -319,6 +319,35 @@ static void fw_download_failed(enum golioth_ota_reason reason)
                                             | FW_REPORT_TARGET_VERSION);
 }
 
+static enum golioth_status fw_change_image_and_reboot()
+{
+    GLTH_LOGI(TAG, "State = Updating");
+    golioth_fw_update_report_state_sync(&_component_ctx,
+                                        GOLIOTH_OTA_STATE_UPDATING,
+                                        GOLIOTH_OTA_REASON_READY,
+                                        FW_REPORT_COMPONENT_NAME | FW_REPORT_CURRENT_VERSION
+                                            | FW_REPORT_TARGET_VERSION);
+    enum golioth_status status = fw_update_change_boot_image();
+    if (status != GOLIOTH_OK)
+    {
+        GLTH_LOGE(TAG, "Firmware change boot image failed");
+        return status;
+    }
+
+    int countdown = 5;
+    while (countdown > 0)
+    {
+        GLTH_LOGI(TAG, "Rebooting into new image in %d seconds", countdown);
+        golioth_sys_msleep(1000);
+        countdown--;
+    }
+    fw_update_reboot();
+
+    // Should never be reached.
+    return GOLIOTH_OK;
+}
+
+
 static void fw_update_thread(void *arg)
 {
     // If it's the first time booting a new OTA image,
@@ -422,6 +451,18 @@ static void fw_update_thread(void *arg)
                 GLTH_LOGI(TAG,
                           "Manifest does not contain different firmware version. Nothing to do.");
                 continue;
+            }
+
+            if (fw_update_validate(_component_ctx.target_component.hash,
+                                   _component_ctx.target_component.size)
+                == GOLIOTH_OK)
+            {
+                GLTH_LOGI(TAG, "Target component already downloaded. Attempting to update.");
+                if (fw_change_image_and_reboot() != GOLIOTH_OK)
+                {
+                    GLTH_LOGE(TAG,
+                              "Failed to reboot into new image. Attempting to download again.");
+                }
             }
 
             break;
@@ -565,21 +606,6 @@ static void fw_update_thread(void *arg)
                   download_ctx.bytes_downloaded,
                   golioth_sys_now_ms() - start_time_ms);
 
-        if (fw_update_validate() != GOLIOTH_OK)
-        {
-            GLTH_LOGE(TAG, "Firmware validate failed");
-            fw_update_end();
-
-            GLTH_LOGI(TAG, "State = Idle");
-            golioth_fw_update_report_state_sync(&_component_ctx,
-                                                GOLIOTH_OTA_STATE_IDLE,
-                                                GOLIOTH_OTA_REASON_INTEGRITY_CHECK_FAILURE,
-                                                FW_REPORT_COMPONENT_NAME | FW_REPORT_CURRENT_VERSION
-                                                    | FW_REPORT_TARGET_VERSION);
-
-            continue;
-        }
-
         GLTH_LOGI(TAG, "State = Downloaded");
         golioth_fw_update_report_state_sync(&_component_ctx,
                                             GOLIOTH_OTA_STATE_DOWNLOADED,
@@ -604,14 +630,11 @@ static void fw_update_thread(void *arg)
         /* Download successful. Reset backoff */
         backoff_reset(&_component_ctx);
 
-        int countdown = 5;
-        while (countdown > 0)
+        if (fw_change_image_and_reboot() != GOLIOTH_OK)
         {
-            GLTH_LOGI(TAG, "Rebooting into new image in %d seconds", countdown);
-            golioth_sys_msleep(1000);
-            countdown--;
+            GLTH_LOGE(TAG, "Failed to reboot into new image.");
+            fw_update_end();
         }
-        fw_update_reboot();
     }
 }
 
