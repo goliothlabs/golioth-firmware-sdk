@@ -10,6 +10,9 @@
 #include "esp_flash_partitions.h"
 #include "esp_app_format.h"
 #include "esp_system.h"
+#include "bootloader_common.h"
+#include "golioth/golioth_status.h"
+#include "golioth/ota.h"
 #include <string.h>  // memcpy
 
 #define TAG "fw_update_esp_idf"
@@ -83,12 +86,7 @@ enum golioth_status fw_update_handle_block(const uint8_t *block,
     return GOLIOTH_OK;
 }
 
-void fw_update_post_download(void)
-{
-    // Nothing to do
-}
-
-enum golioth_status fw_update_validate(void)
+enum golioth_status fw_update_post_download(void)
 {
     assert(_update_handle);
     esp_err_t err = esp_ota_end(_update_handle);
@@ -103,6 +101,39 @@ enum golioth_status fw_update_validate(void)
             GLTH_LOGE(TAG, "esp_ota_end failed (%s)!", esp_err_to_name(err));
         }
 
+        return GOLIOTH_ERR_FAIL;
+    }
+
+    return GOLIOTH_OK;
+}
+
+enum golioth_status fw_update_validate(const uint8_t *hash, const size_t size)
+{
+    _update_partition = esp_ota_get_next_update_partition(NULL);
+    assert(_update_partition);
+
+    if (size > _update_partition->size)
+    {
+        return GOLIOTH_ERR_FAIL;
+    }
+
+    uint8_t calc_sha256[GOLIOTH_OTA_COMPONENT_BIN_HASH_LEN];
+
+    // Manually set size and type of partition. When partition is PART_TYPE_APP, the appended digest
+    // in the image will be used, rather than the hash of the full contents. Overriding to
+    // PART_TYPE_DATA requires that we use the image size rather than the partition size to ensure
+    // that only the hash of the image contents is calculated.
+    if (bootloader_common_get_sha256_of_partition(_update_partition->address,
+                                                  size,
+                                                  PART_TYPE_DATA,
+                                                  calc_sha256)
+        != ESP_OK)
+    {
+        return GOLIOTH_ERR_FAIL;
+    }
+
+    if (memcmp(hash, calc_sha256, sizeof(calc_sha256)) != 0)
+    {
         return GOLIOTH_ERR_FAIL;
     }
 
